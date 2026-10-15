@@ -127,7 +127,7 @@ router.post('/register', registerValidation, async (req, res) => {
 
     // Send verification email
     try {
-      await emailService.sendVerificationEmail(user, verificationToken);
+      await emailService.sendVerificationEmail(user, verificationToken, req);
       res.redirect(`/mat?success=${encodeURIComponent('Registration successful! Please check your email to verify your account.')}`);
     } catch (emailError) {
       console.error('Email sending failed:', emailError);
@@ -240,7 +240,7 @@ router.post('/forgot-password', forgotPasswordValidation, async (req, res) => {
 
     // Send password reset email
     try {
-      await emailService.sendPasswordResetEmail(user, resetToken);
+      await emailService.sendPasswordResetEmail(user, resetToken, req);
       res.redirect(`/mat?success=${encodeURIComponent('If an account with this email exists, a password reset link has been sent.')}`);
     } catch (emailError) {
       console.error('Password reset email failed:', emailError);
@@ -370,7 +370,7 @@ router.post('/resend-verification', async (req, res) => {
     await user.save();
 
     // Send verification email
-    await emailService.sendVerificationEmail(user, verificationToken);
+    await emailService.sendVerificationEmail(user, verificationToken, req);
 
     res.redirect(`/mat?success=${encodeURIComponent('Verification email sent! Please check your inbox.')}`);
 

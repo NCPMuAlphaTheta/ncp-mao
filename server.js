@@ -7,6 +7,7 @@ import connectDB from './config/database.js';
 import authRoutes from './routes/auth.js';
 import apiRoutes from './routes/api.js';
 import { attachUser, isAuthenticated, hasRole } from './middleware/auth.js';
+import emailService from './services/emailService.js';
 
 dotenv.config();
 
@@ -15,10 +16,31 @@ connectDB();
 
 const app = express();
 
+// Trust reverse proxies (Vercel, Render, etc.) to get correct protocol and host headers
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Track active domain/base URL from incoming requests for email links and templates
+app.use((req, res, next) => {
+  const host = req.headers['x-forwarded-host'] || req.get('host');
+  if (host) {
+    const cleanHost = host.split(',')[0].trim();
+    let proto = req.headers['x-forwarded-proto'] || req.protocol;
+    if (proto) {
+      proto = proto.split(',')[0].trim();
+    } else {
+      proto = (cleanHost.includes('localhost') || cleanHost.includes('127.0.0.1')) ? 'http' : 'https';
+    }
+    const detectedBaseUrl = `${proto}://${cleanHost}`;
+    emailService.setLastKnownBaseUrl(detectedBaseUrl);
+    res.locals.baseUrl = detectedBaseUrl;
+  }
+  next();
+});
 
 // Session configuration
 app.use(session({

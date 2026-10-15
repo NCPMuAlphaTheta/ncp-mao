@@ -5,6 +5,7 @@ dotenv.config();
 
 class EmailService {
   constructor() {
+    this.lastKnownBaseUrl = null;
     // Only create transporter if email credentials are provided
     if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
       this.transporter = nodemailer.createTransport({
@@ -22,13 +23,92 @@ class EmailService {
     }
   }
 
-  async sendVerificationEmail(user, token) {
+  setLastKnownBaseUrl(url) {
+    if (url && typeof url === 'string') {
+      this.lastKnownBaseUrl = url.trim().replace(/\/+$/, '');
+    }
+  }
+
+  getBaseUrl(reqOrBaseUrl = null) {
+    // 1. Explicit string passed in
+    if (typeof reqOrBaseUrl === 'string' && reqOrBaseUrl.trim()) {
+      let url = reqOrBaseUrl.trim().replace(/\/+$/, '');
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = `https://${url}`;
+      }
+      return url;
+    }
+
+    // 2. Express request object (or options object containing req)
+    const req = reqOrBaseUrl && (reqOrBaseUrl.headers ? reqOrBaseUrl : reqOrBaseUrl.req);
+    if (req && req.headers) {
+      const rawHost = req.headers['x-forwarded-host'] || (typeof req.get === 'function' ? req.get('host') : req.headers.host);
+      if (rawHost) {
+        const host = rawHost.split(',')[0].trim();
+        let proto = req.headers['x-forwarded-proto'] || req.protocol;
+        if (proto) {
+          proto = proto.split(',')[0].trim();
+        } else {
+          proto = (host.includes('localhost') || host.includes('127.0.0.1')) ? 'http' : 'https';
+        }
+        return `${proto}://${host}`.replace(/\/+$/, '');
+      }
+    }
+
+    // 3. If explicit non-localhost BASE_URL is set in environment, use it
+    if (process.env.BASE_URL) {
+      const base = process.env.BASE_URL.trim().replace(/\/+$/, '');
+      const isLocal = base.includes('localhost') || base.includes('127.0.0.1');
+      if (!isLocal) {
+        return (base.startsWith('http://') || base.startsWith('https://')) ? base : `https://${base}`;
+      }
+    }
+
+    // 4. Last known base URL captured from live HTTP requests (if non-localhost or if not on Vercel)
+    if (this.lastKnownBaseUrl) {
+      const isVercel = Boolean(process.env.VERCEL || process.env.NOW_REGION || process.env.VERCEL_URL);
+      const isLocal = this.lastKnownBaseUrl.includes('localhost') || this.lastKnownBaseUrl.includes('127.0.0.1');
+      if (!isVercel || !isLocal) {
+        return this.lastKnownBaseUrl;
+      }
+    }
+
+    // 5. Vercel deployment environment variables (provided automatically by Vercel)
+    const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+                       process.env.VERCEL_URL ||
+                       process.env.VERCEL_BRANCH_URL;
+    if (vercelHost && typeof vercelHost === 'string') {
+      let host = vercelHost.trim().replace(/\/+$/, '');
+      if (!host.startsWith('http://') && !host.startsWith('https://')) {
+        host = `https://${host}`;
+      }
+      return host;
+    }
+
+    // 6. Render deployment environment variable
+    if (process.env.RENDER_EXTERNAL_URL) {
+      return process.env.RENDER_EXTERNAL_URL.trim().replace(/\/+$/, '');
+    }
+
+    // 7. If BASE_URL was set (even if localhost in local dev)
+    if (process.env.BASE_URL) {
+      const base = process.env.BASE_URL.trim().replace(/\/+$/, '');
+      return (base.startsWith('http://') || base.startsWith('https://')) ? base : `http://${base}`;
+    }
+
+    // 8. Local development fallback
+    const port = process.env.PORT || 3000;
+    return `http://localhost:${port}`;
+  }
+
+  async sendVerificationEmail(user, token, reqOrBaseUrl = null) {
     if (!this.transporter) {
       console.log('📧 Email service not configured - skipping verification email');
       throw new Error('Email service not configured. Please set up EMAIL_USER and EMAIL_PASS in your .env file.');
     }
 
-    const verificationUrl = `${process.env.BASE_URL || 'http://localhost:3000'}/verify-email/${token}`;
+    const baseUrl = this.getBaseUrl(reqOrBaseUrl);
+    const verificationUrl = `${baseUrl}/verify-email/${token}`;
 
     const mailOptions = {
       from: process.env.EMAIL_USER,
@@ -87,12 +167,13 @@ class EmailService {
     }
   }
 
-  async sendPasswordResetEmail(user, token) {
+  async sendPasswordResetEmail(user, token, reqOrBaseUrl = null) {
     if (!this.transporter) {
       console.log('📧 Email service not configured - skipping password reset email');
       throw new Error('Email service not configured. Please set up EMAIL_USER and EMAIL_PASS in your .env file.');
     }
-    const resetUrl = `${process.env.BASE_URL || 'http://localhost:3000'}/reset-password/${token}`;
+    const baseUrl = this.getBaseUrl(reqOrBaseUrl);
+    const resetUrl = `${baseUrl}/reset-password/${token}`;
 
     const mailOptions = {
       from: process.env.EMAIL_USER,
@@ -151,12 +232,13 @@ class EmailService {
     }
   }
 
-  async sendSessionCancelledEmail(user, sessionDetails) {
+  async sendSessionCancelledEmail(user, sessionDetails, reqOrBaseUrl = null) {
     if (!this.transporter) {
       console.log('📧 Email service not configured - skipping session cancelled email');
       return;
     }
 
+    const baseUrl = this.getBaseUrl(reqOrBaseUrl);
     const sessionDate = new Date(sessionDetails.date).toLocaleDateString('en-US', {
       weekday: 'long',
       month: 'long',
@@ -193,7 +275,7 @@ class EmailService {
             </p>
             
             <div style="text-align: center; margin: 30px 0;">
-              <a href="${process.env.BASE_URL || 'http://localhost:3000'}/student-dashboard" 
+              <a href="${baseUrl}/student-dashboard" 
                  style="background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; padding: 14px 28px; 
                         text-decoration: none; border-radius: 8px; font-weight: 600; display: inline-block;">
                 View Tutoring Calendar
@@ -212,12 +294,13 @@ class EmailService {
     }
   }
 
-  async sendSessionUpdatedEmail(user, oldSessionDetails, newSessionDetails, changes) {
+  async sendSessionUpdatedEmail(user, oldSessionDetails, newSessionDetails, changes, reqOrBaseUrl = null) {
     if (!this.transporter) {
       console.log('📧 Email service not configured - skipping session updated email');
       return;
     }
 
+    const baseUrl = this.getBaseUrl(reqOrBaseUrl);
     const sessionDate = new Date(oldSessionDetails.date).toLocaleDateString('en-US', {
       weekday: 'long',
       month: 'long',
@@ -271,7 +354,7 @@ class EmailService {
             </p>
             
             <div style="text-align: center; margin: 30px 0;">
-              <a href="${process.env.BASE_URL || 'http://localhost:3000'}/student-dashboard" 
+              <a href="${baseUrl}/student-dashboard" 
                  style="background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; padding: 14px 28px; 
                         text-decoration: none; border-radius: 8px; font-weight: 600; display: inline-block;">
                 View My Sessions

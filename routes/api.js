@@ -570,7 +570,7 @@ router.post('/update-session', isAuthenticated, isTeacher, async (req, res) => {
               date: date,
               time: currentSession.time,
               room: currentSession.room
-            });
+            }, req);
           } catch (emailError) {
             console.log('Error sending cancellation email:', emailError.message);
           }
@@ -608,7 +608,8 @@ router.post('/update-session', isAuthenticated, isTeacher, async (req, res) => {
               signup.userId,
               currentSession,
               newSessionDetails,
-              changes
+              changes,
+              req
             );
           } catch (emailError) {
             console.log('Error sending update email:', emailError.message);
@@ -723,7 +724,7 @@ router.post('/delete-session', isAuthenticated, isTeacher, async (req, res) => {
             date: date,
             time: time,
             room: sessionToDelete.room
-          });
+          }, req);
         }
       }
     }
